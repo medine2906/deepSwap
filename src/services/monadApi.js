@@ -1,4 +1,6 @@
 const EXPLORER = 'https://testnet.monadexplorer.com';
+const API_BASE = import.meta.env.DEV ? '/monad-api' : EXPLORER;
+
 export const EXPLORER_TX_URL = (hash) => `${EXPLORER}/tx/${hash}`;
 export const EXPLORER_ADDR_URL = (addr) => `${EXPLORER}/address/${addr}`;
 
@@ -120,7 +122,7 @@ async function fetchJson(url, timeout = 7000) {
 async function enrichTrader(trader) {
   try {
     const data = await fetchJson(
-      `${EXPLORER}/api/v2/addresses/${trader.address}/transactions?limit=5&filter=validated`,
+      `${API_BASE}/api/v2/addresses/${trader.address}/transactions?limit=5&filter=validated`,
       5000
     );
     const txns = (data.items || []).filter(Boolean);
@@ -149,14 +151,14 @@ async function enrichTrader(trader) {
 
 // Strategy 1: listaccounts
 async function tryListAccounts() {
-  const data = await fetchJson(`${EXPLORER}/api?module=account&action=listaccounts&limit=20`);
+  const data = await fetchJson(`${API_BASE}/api?module=account&action=listaccounts&limit=20`);
   if (data.status !== '1' || !Array.isArray(data.result) || !data.result.length) throw new Error('empty');
   return data.result.slice(0, 12).map(mapAccountToTrader);
 }
 
 // Strategy 2: recent validated transactions → unique senders
 async function tryFromTransactions() {
-  const data = await fetchJson(`${EXPLORER}/api/v2/transactions?filter=validated&limit=50`);
+  const data = await fetchJson(`${API_BASE}/api/v2/transactions?filter=validated&limit=50`);
   const txns = data.items || [];
   if (!txns.length) throw new Error('empty');
 
@@ -197,7 +199,7 @@ export async function fetchTopTraders() {
 
 export async function fetchMonadStats() {
   try {
-    const data = await fetchJson(`${EXPLORER}/api/v2/stats`, 5000);
+    const data = await fetchJson(`${API_BASE}/api/v2/stats`, 5000);
     return {
       totalTxns: data.total_transactions || null,
       totalBlocks: data.total_blocks || null,

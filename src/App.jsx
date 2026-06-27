@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SwipeCard from './components/SwipeCard';
 import Leaderboard from './components/Leaderboard';
 import Portfolio from './components/Portfolio';
+import Inbox from './components/Inbox';
+import Chat from './components/Chat';
+import { BlockieAvatar } from './components/SwipeCard';
 import mockTraders from './data/mockTraders.json';
 import { fetchTopTraders, fetchMonadStats, EXPLORER_ADDR_URL } from './services/monadApi';
 import { fetchMONPrice, fetchMonadTrendingTokens } from './services/dexscreenerApi';
@@ -87,11 +90,22 @@ function IconProfile({ active }) {
   );
 }
 
+function IconInbox({ active }) {
+  const c = active ? '#ff9f1c' : 'rgba(255,255,255,0.3)';
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke={c} strokeWidth="1.6" fill={active ? 'rgba(255,159,28,0.15)' : 'none'}/>
+      <path d="M22 6l-10 7L2 6" stroke={c} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
 const TABS = [
   { id: 'deck',         Icon: IconDeck,        label: 'Deck' },
   { id: 'portfolio',    Icon: IconPortfolio,   label: 'Portfolio' },
-  { id: 'leaderboard', Icon: IconLeaderboard,  label: 'Top' },
-  { id: 'profile',     Icon: IconProfile,      label: 'Profile' },
+  { id: 'inbox',        Icon: IconInbox,       label: 'Inbox' },
+  { id: 'leaderboard',  Icon: IconLeaderboard, label: 'Top' },
+  { id: 'profile',      Icon: IconProfile,     label: 'Profile' },
 ];
 
 /* ── Empty tab placeholder ── */
@@ -279,6 +293,9 @@ export default function App() {
   const [tradeToken, setTradeToken]     = useState(() => loadLS('monad_tradeToken', 'MON'));
   const [lastTxHash, setLastTxHash]     = useState(() => loadLS('monad_lastTx', null));
   const [favorites, setFavorites]       = useState(() => loadLS('monad_favorites', []));
+  const [matches, setMatches]           = useState(() => loadLS('monad_matches', []));
+  const [messages, setMessages]         = useState(() => loadLS('monad_messages', {}));
+  const [activeChat, setActiveChat]     = useState(null);
   const topCardRef  = useRef(null);
   const matchTimer  = useRef(null);
 
@@ -387,6 +404,14 @@ export default function App() {
     saveLS('monad_favorites', favorites);
   }, [favorites]);
 
+  // Eşleşmeler ve Mesajlar
+  useEffect(() => {
+    saveLS('monad_matches', matches);
+  }, [matches]);
+  useEffect(() => {
+    saveLS('monad_messages', messages);
+  }, [messages]);
+
   const toggleFavorite = useCallback((trader) => {
     setFavorites(prev => {
       const exists = prev.find(f => f.address === trader.address);
@@ -439,8 +464,8 @@ export default function App() {
     const monPriceData = await fetchMONPrice().catch(() => null);
     const entryPriceUsd = monPriceData?.priceUsd ?? null;
     setPortfolio(prev => [{ trader: t, action: 'COPY', amount: tradeAmount, token: tokenObj, time: Date.now(), entryPriceUsd }, ...prev]);
-    if (Math.random() < 0.35) {
-      matchTimer.current = setTimeout(() => setMatchTrader(t), 2400);
+    if (Math.random() < 0.65) {
+      matchTimer.current = setTimeout(() => setMatchTrader(t), 1200);
     }
   }, [removeCard, sendTx, tradeAmount, tradeToken, allTokens]);
   const handleSwipeUp = useCallback(async (t) => {
@@ -472,6 +497,58 @@ export default function App() {
 
   return (
     <div className="app-container">
+
+      {/* ── MATCH MODAL ── */}
+      {matchTrader && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'rgba(10,10,26,0.95)', backdropFilter: 'blur(20px)' }}>
+          <div className="animate-slide-up" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', width: '100%', maxWidth: 340 }}>
+            <h2 style={{ fontSize: 44, fontWeight: 900, color: '#f72585', margin: 0, textShadow: '0 0 32px rgba(247,37,133,0.6)', fontStyle: 'italic', letterSpacing: '-0.05em' }}>
+              IT'S A MATCH!
+            </h2>
+            <p style={{ fontSize: 16, color: 'rgba(255,255,255,0.7)', marginTop: 12 }}>
+              You and <span style={{ color: '#fff', fontWeight: 800 }}>{matchTrader.address.slice(0,6)}…{matchTrader.address.slice(-4)}</span> liked each other.
+            </p>
+            
+            <div style={{ display: 'flex', gap: 16, margin: '32px 0' }}>
+              <div style={{ width: 90, height: 90, borderRadius: '50%', border: '4px solid #f72585', overflow: 'hidden', boxShadow: '0 0 30px rgba(247,37,133,0.3)', background: 'linear-gradient(135deg, #f72585, #ff6b35)' }}>
+                 <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>🦊</div>
+              </div>
+              <div style={{ width: 90, height: 90, borderRadius: '50%', border: '4px solid #00f5a0', overflow: 'hidden', boxShadow: '0 0 30px rgba(0,245,160,0.3)' }}>
+                 <BlockieAvatar addr={matchTrader.address} size={90} />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
+              <button 
+                onClick={() => {
+                  setMatches(prev => {
+                     if (!prev.find(m => m.address === matchTrader.address)) return [matchTrader, ...prev];
+                     return prev;
+                  });
+                  setActiveTab('inbox');
+                  setActiveChat(matchTrader);
+                  setMatchTrader(null);
+                }}
+                style={{ padding: '16px', borderRadius: 24, background: 'linear-gradient(135deg, #f72585, #7b61ff)', border: 'none', color: '#fff', fontSize: 16, fontWeight: 800, cursor: 'pointer', boxShadow: '0 8px 24px rgba(247,37,133,0.4)' }}
+              >
+                Send a Message
+              </button>
+              <button 
+                onClick={() => {
+                  setMatches(prev => {
+                     if (!prev.find(m => m.address === matchTrader.address)) return [matchTrader, ...prev];
+                     return prev;
+                  });
+                  setMatchTrader(null);
+                }}
+                style={{ padding: '16px', borderRadius: 24, background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', fontSize: 16, fontWeight: 800, cursor: 'pointer' }}
+              >
+                Keep Swiping
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── APE BURST ── */}
       {showApe && (
@@ -624,6 +701,19 @@ export default function App() {
                   Reload Deck
                 </button>
               </div>
+            )}
+          </div>
+        ) : activeTab === 'inbox' ? (
+          <div className="h-full overflow-hidden -mx-4 -mb-4">
+            {activeChat ? (
+              <Chat 
+                trader={activeChat} 
+                initialMessages={messages[activeChat.address] || []} 
+                onBack={() => setActiveChat(null)} 
+                onUpdateMessages={(addr, msgs) => setMessages(prev => ({ ...prev, [addr]: msgs }))} 
+              />
+            ) : (
+              <Inbox matches={matches} lastMessages={messages} onOpenChat={setActiveChat} />
             )}
           </div>
         ) : activeTab === 'leaderboard' ? (
