@@ -7,7 +7,7 @@ function fmtUsd(val) {
   const abs = Math.abs(val);
   if (abs >= 1000) return `$${(val / 1000).toFixed(2)}k`;
   if (abs >= 1)    return `$${val.toFixed(2)}`;
-  return `$${val.toFixed(4)}`;
+  return `$${val.toFixed(3)}`;
 }
 function fmtPct(val) {
   if (val == null) return '—';
@@ -115,7 +115,7 @@ function MonPriceTicker({ data, loading }) {
 
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 900, color: '#111827' }}>
-            ${data.priceUsd?.toFixed(4)}
+            ${data.priceUsd?.toFixed(2)}
           </div>
           <div style={{
             fontSize: 11, fontWeight: 700,
@@ -159,7 +159,7 @@ function PortfolioSummary({ items, monData }) {
           Deployed
         </div>
         <div style={{ fontSize: 13, fontWeight: 900, color: '#111827' }}>
-          {totalSpent.toFixed(4)}
+          {totalSpent.toFixed(2)}
           <span style={{ fontSize: 9, color: '#7b61ff', marginLeft: 3, fontWeight: 800 }}>MON</span>
         </div>
         {totalSpentUsd != null && (
@@ -208,6 +208,7 @@ function PortfolioSummary({ items, monData }) {
 function PortfolioCard({ item, monData }) {
   const pnl = item.pnl;
   const isCopy = item.action === 'COPY';
+  const isSwap = item.token?.symbol && item.token.symbol !== 'MON';
 
   return (
     <div style={{
@@ -256,14 +257,26 @@ function PortfolioCard({ item, monData }) {
             }}>
               {isCopy ? '✓ COPY' : '💸 ALL IN'}
             </span>
+            {/* Swap badge */}
+            {isSwap && (
+              <span style={{
+                fontSize: 9, fontWeight: 900, letterSpacing: '0.05em',
+                padding: '2px 7px', borderRadius: 20,
+                background: 'rgba(0,245,160,0.1)',
+                color: '#00c487',
+                border: '1px solid rgba(0,245,160,0.25)',
+              }}>
+                ↗ SWAP
+              </span>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, color: '#6b7280' }}>
-              Spent&nbsp;
+              {isSwap ? 'Swapped' : 'Sent'}&nbsp;
               <span style={{ color: '#7b61ff', fontWeight: 800 }}>{item.amount} MON</span>
-              {item.token && item.token.symbol && item.token.symbol !== 'MON' && (
-                <span>&nbsp;→ <span style={{ fontWeight: 800, color: '#111827' }}>{item.token.symbol}</span></span>
+              {isSwap && (
+                <span>&nbsp;→ <span style={{ fontWeight: 800, color: '#00c487' }}>{item.token.symbol}</span></span>
               )}
             </span>
             {monData && (
@@ -275,7 +288,7 @@ function PortfolioCard({ item, monData }) {
 
           {item.entryPriceUsd != null && (
             <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>
-              Entry @ ${item.entryPriceUsd.toFixed(4)} · {timeAgo(item.time)}
+              Entry @ ${item.entryPriceUsd.toFixed(2)} · {timeAgo(item.time)}
             </div>
           )}
         </div>
@@ -312,7 +325,7 @@ function PortfolioCard({ item, monData }) {
         }}>
           <div style={{ display: 'flex', gap: 14 }}>
             {[
-              { label: 'PRICE', val: `$${item.pairData.priceUsd?.toFixed(4)}`, col: '#111827' },
+              { label: 'PRICE', val: `$${item.pairData.priceUsd?.toFixed(2)}`, col: '#111827' },
               { label: '1H',    val: fmtPct(item.pairData.priceChange?.h1),  col: (item.pairData.priceChange?.h1 ?? 0) >= 0 ? '#10b981' : '#ef4444' },
               { label: '24H',   val: fmtPct(item.pairData.priceChange?.h24), col: (item.pairData.priceChange?.h24 ?? 0) >= 0 ? '#10b981' : '#ef4444' },
             ].map(({ label, val, col }) => (

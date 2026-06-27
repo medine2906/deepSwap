@@ -144,11 +144,28 @@ export async function swapMonForToken(from, tokenAddress, amountMon, slippagePct
   return txHash;
 }
 
+// ── Native MON → WETH wrap (deposit) ──
+export async function wrapMonToWeth(from, amountMon) {
+  const amountInWei = BigInt(Math.round(amountMon * 1e9)) * 10n ** 9n;
+  return window.ethereum.request({
+    method: 'eth_sendTransaction',
+    params: [{
+      from,
+      to: CONTRACTS.WETH,
+      value: '0x' + amountInWei.toString(16),
+      data: '0xd0e30db0', // WETH.deposit()
+      gas: '0x30D40',
+    }],
+  });
+}
+
 // ── Ana işlem fonksiyonu: token'a göre swap ya da transfer ──
+// Dönüş: { hash, type: 'send' | 'swap' }
 export async function executeTradeTransaction(from, traderAddress, amountMon, tokenSymbol, tokenAddress) {
   // MON seçilmişse → direkt transfer
   if (!tokenSymbol || tokenSymbol === 'MON') {
-    return sendTradeTransaction(from, traderAddress, amountMon);
+    const hash = await sendTradeTransaction(from, traderAddress, amountMon);
+    return { hash, type: 'send' };
   }
 
   // Sabit listede varsa adresini al (case-insensitive)
@@ -157,14 +174,18 @@ export async function executeTradeTransaction(from, traderAddress, amountMon, to
   const targetAddress = tokenAddress || knownToken?.address;
 
   if (!targetAddress) {
-    // Adresi bilinmeyen token → MON transfer
-    return sendTradeTransaction(from, traderAddress, amountMon);
+    // Adresi bilinmeyen token → MON transfer (adres yok, swap mümkün değil)
+    const hash = await sendTradeTransaction(from, traderAddress, amountMon);
+    return { hash, type: 'send' };
   }
 
-  try {
-    return await swapMonForToken(from, targetAddress, amountMon);
-  } catch {
-    // Swap fail (pool yok, likidite yok, vb.) → MON transfer'a düş
-    return sendTradeTransaction(from, traderAddress, amountMon);
+  // WETH: native MON'u wrap et (deposit)
+  if (targetAddress.toLowerCase() === CONTRACTS.WETH.toLowerCase()) {
+    const hash = await wrapMonToWeth(from, amountMon);
+    return { hash, type: 'swap' };
   }
+
+  // Diğer token'lar: DEX swap (hata olursa kullanıcıya bildir, sessiz fallback yok)
+  const hash = await swapMonForToken(from, targetAddress, amountMon);
+  return { hash, type: 'swap' };
 }

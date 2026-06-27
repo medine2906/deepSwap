@@ -42,6 +42,8 @@ const TOASTS = {
   connect:    { msg: 'Wallet Connected',    icon: '🟢', color: 'rgba(0,192,135,0.95)',  border: 'rgba(0,192,135,0.3)' },
   tx_sent:    { msg: 'Tx Sent!',           icon: '⛓',  color: 'rgba(123,97,255,0.95)', border: 'rgba(123,97,255,0.3)' },
   tx_error:   { msg: 'Tx Failed',          icon: '⚠',  color: 'rgba(255,71,87,0.95)',  border: 'rgba(255,71,87,0.3)' },
+  swap_sent:  { msg: 'Swap Sent!',         icon: '↗',  color: 'rgba(0,192,135,0.95)',  border: 'rgba(0,192,135,0.3)' },
+  swap_error: { msg: 'Swap Failed',        icon: '⚠',  color: 'rgba(255,71,87,0.95)',  border: 'rgba(255,71,87,0.3)' },
   no_funds:   { msg: 'Not enough MON!',    icon: '💰', color: 'rgba(255,159,28,0.95)', border: 'rgba(255,159,28,0.3)' },
   no_wallet:  { msg: 'Install MetaMask!',  icon: '🦊', color: 'rgba(255,181,71,0.95)', border: 'rgba(255,181,71,0.3)' },
 };
@@ -460,16 +462,17 @@ export default function App() {
   const sendTx = useCallback(async (trader, amountMon, tokenObj) => {
     if (!walletAddress || !trader.address) return;
     try {
-      const txHash = await executeTradeTransaction(walletAddress, trader.address, amountMon, tokenObj?.symbol, tokenObj?.address);
-      setLastTxHash(txHash);
-      showToast('tx_sent');
+      const { hash, type } = await executeTradeTransaction(walletAddress, trader.address, amountMon, tokenObj?.symbol, tokenObj?.address);
+      setLastTxHash(hash);
+      showToast(type === 'swap' ? 'swap_sent' : 'tx_sent');
     } catch (err) {
       if (err.code === 4001) return;
       const msg = (err.message || '').toLowerCase();
+      const isSwap = tokenObj?.symbol && tokenObj.symbol !== 'MON';
       if (msg.includes('insufficient funds') || msg.includes('insufficient balance') || msg.includes('exceeds balance')) {
         showToast('no_funds');
       } else {
-        showToast('tx_error');
+        showToast(isSwap ? 'swap_error' : 'tx_error');
       }
     }
   }, [walletAddress]);

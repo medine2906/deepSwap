@@ -158,8 +158,6 @@ function CardBackground({ addr, tier }) {
         <circle cx="310" cy="120" r="3" fill={c2} fillOpacity="0.4" />
         <circle cx="50"  cy="220" r="5" fill={c1} fillOpacity="0.3" />
         <circle cx="340" cy="250" r="4" fill={c2} fillOpacity="0.35" />
-        <circle cx="130" cy="50"  r="3" fill={c2} fillOpacity="0.4" />
-        <circle cx="260" cy="60"  r="2" fill={c1} fillOpacity="0.5" />
         {/* Corner accents */}
         <path d="M0,0 L40,0 L0,40 Z" fill={c1} fillOpacity="0.1" />
         <path d="M393,0 L353,0 L393,40 Z" fill={c2} fillOpacity="0.1" />
