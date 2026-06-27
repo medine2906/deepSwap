@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SwipeCard from './components/SwipeCard';
 import Leaderboard from './components/Leaderboard';
+import Portfolio from './components/Portfolio';
 import mockTraders from './data/mockTraders.json';
 import { fetchTopTraders, fetchMonadStats } from './services/monadApi';
+import { fetchMONPrice, fetchMonadTrendingTokens } from './services/dexscreenerApi';
 import {
   connectWallet,
   getConnectedAccount,
-  sendTradeTransaction,
+  executeTradeTransaction,
   isMetaMaskAvailable,
   EXPLORER_URL,
+  SWAP_TOKENS,
 } from './services/wallet';
 
 /* ── Clock hook ── */
@@ -40,44 +43,45 @@ const TOASTS = {
 
 /* ── SVG Nav Icons ── */
 function IconDeck({ active }) {
-  const c = active ? '#FFB547' : '#4B5568';
+  const c = active ? '#f72585' : 'rgba(255,255,255,0.3)';
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <rect x="4" y="8" width="16" height="13" rx="3" stroke={c} strokeWidth="1.6"/>
-      <rect x="7" y="5" width="13" height="12" rx="3" stroke={c} strokeWidth="1.6"/>
-      {active && <rect x="4" y="8" width="16" height="13" rx="3" fill="#FFB547" fillOpacity="0.2"/>}
+      <rect x="4" y="8" width="16" height="13" rx="3" stroke={c} strokeWidth="1.6"
+        fill={active ? 'rgba(247,37,133,0.15)' : 'none'}/>
+      <rect x="7" y="5" width="13" height="12" rx="3" stroke={c} strokeWidth="1.6"
+        fill={active ? 'rgba(247,37,133,0.08)' : 'none'}/>
     </svg>
   );
 }
 
 function IconPortfolio({ active }) {
-  const c = active ? '#1BC7B3' : '#4B5568';
+  const c = active ? '#7b61ff' : 'rgba(255,255,255,0.3)';
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <rect x="3" y="12" width="4" height="9" rx="1.5" fill={c} fillOpacity={active ? 1 : 0.6}/>
-      <rect x="10" y="7" width="4" height="14" rx="1.5" fill={c} fillOpacity={active ? 1 : 0.6}/>
-      <rect x="17" y="3" width="4" height="18" rx="1.5" fill={c} fillOpacity={active ? 1 : 0.6}/>
+      <rect x="3" y="12" width="4" height="9" rx="1.5" fill={c} fillOpacity={active ? 0.9 : 0.4}/>
+      <rect x="10" y="7" width="4" height="14" rx="1.5" fill={c} fillOpacity={active ? 0.9 : 0.4}/>
+      <rect x="17" y="3" width="4" height="18" rx="1.5" fill={c} fillOpacity={active ? 0.9 : 0.4}/>
     </svg>
   );
 }
 
 function IconLeaderboard({ active }) {
-  const c = active ? '#FFB547' : '#4B5568';
+  const c = active ? '#4cc9f0' : 'rgba(255,255,255,0.3)';
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
       <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6L12 2z"
         stroke={c} strokeWidth="1.6" strokeLinejoin="round"
-        fill={active ? c : 'none'} fillOpacity={active ? 0.2 : 0}/>
+        fill={active ? 'rgba(76,201,240,0.2)' : 'none'}/>
     </svg>
   );
 }
 
 function IconProfile({ active }) {
-  const c = active ? '#1BC7B3' : '#4B5568';
+  const c = active ? '#00f5a0' : 'rgba(255,255,255,0.3)';
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="8" r="4" stroke={c} strokeWidth="1.6"
-        fill={active ? c : 'none'} fillOpacity={active ? 0.2 : 0}/>
+        fill={active ? 'rgba(0,245,160,0.15)' : 'none'}/>
       <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke={c} strokeWidth="1.6" strokeLinecap="round"/>
     </svg>
   );
@@ -135,34 +139,204 @@ function SignalDots() {
   );
 }
 
+/* ── localStorage helpers ── */
+function loadLS(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw !== null ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+function saveLS(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+/* ── Trade Amount Tier Selector ── */
+const TIERS = [
+  { label: '0.001', value: 0.001 },
+  { label: '0.01',  value: 0.01  },
+  { label: '0.05',  value: 0.05  },
+];
+
+function TierSelector({ amount, onChange }) {
+  const [manualVal, setManualVal] = useState('');
+
+  const isManual = !TIERS.some(t => t.value === amount);
+
+  const handleManualChange = (e) => {
+    const raw = e.target.value.replace(/[^0-9.]/g, '');
+    setManualVal(raw);
+    const num = parseFloat(raw);
+    if (!isNaN(num) && num > 0) onChange(num);
+  };
+
+  const handleTierClick = (val) => {
+    setManualVal('');
+    onChange(val);
+  };
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6,
+      padding: '8px 12px',
+      background: 'rgba(255,255,255,0.04)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: 16,
+      marginBottom: 10,
+    }}>
+      <span style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.12em', whiteSpace: 'nowrap', marginRight: 2 }}>MON</span>
+      <div style={{ display: 'flex', gap: 5, flex: 1 }}>
+        {TIERS.map(tier => {
+          const active = !isManual && amount === tier.value;
+          return (
+            <button
+              key={tier.value}
+              type="button"
+              onClick={() => handleTierClick(tier.value)}
+              style={{
+                flex: 1, padding: '6px 0', borderRadius: 10, border: 'none',
+                fontSize: 11, fontWeight: 800, cursor: 'pointer',
+                transition: 'all 0.18s',
+                background: active
+                  ? 'linear-gradient(135deg,#f72585,#7b61ff)'
+                  : 'rgba(255,255,255,0.07)',
+                color: active ? '#fff' : 'rgba(255,255,255,0.55)',
+                boxShadow: active ? '0 2px 12px rgba(247,37,133,0.35)' : 'none',
+                transform: active ? 'scale(1.05)' : 'scale(1)',
+              }}
+            >
+              {tier.label}
+            </button>
+          );
+        })}
+        {/* Manuel input */}
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="custom"
+          value={manualVal}
+          onFocus={() => {
+            if (isManual) setManualVal(String(amount));
+          }}
+          onChange={handleManualChange}
+          style={{
+            flex: 1.2, padding: '6px 6px', borderRadius: 10,
+            border: `1px solid ${isManual ? 'rgba(123,97,255,0.7)' : 'rgba(255,255,255,0.1)'}`,
+            background: isManual ? 'rgba(123,97,255,0.15)' : 'rgba(255,255,255,0.05)',
+            color: isManual ? '#c4b5fd' : 'rgba(255,255,255,0.4)',
+            fontSize: 11, fontWeight: 800, textAlign: 'center',
+            outline: 'none', transition: 'all 0.18s', minWidth: 0,
+          }}
+        />
+      </div>
+      <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.3)', whiteSpace: 'nowrap' }}>
+        ≈ ${(amount * 3.2).toFixed(4)}
+      </span>
+    </div>
+  );
+}
+
+function TokenSelector({ selected, onChange, tokens }) {
+  return (
+    <div className="hide-scrollbar" style={{ display: 'flex', gap: 6, marginBottom: 8, overflowX: 'auto', paddingBottom: 4 }}>
+      {tokens.map(t => (
+        <button
+          key={t.symbol}
+          type="button"
+          onClick={() => onChange(t.symbol)}
+          style={{
+            flex: '0 0 auto', padding: '8px 14px', borderRadius: 12,
+            fontSize: 12, fontWeight: 800, cursor: 'pointer',
+            transition: 'all 0.18s', display: 'flex', alignItems: 'center', gap: 6,
+            background: selected === t.symbol ? `${t.color || '#fff'}20` : 'rgba(255,255,255,0.05)',
+            color: selected === t.symbol ? (t.color || '#fff') : 'rgba(255,255,255,0.4)',
+            border: `1px solid ${selected === t.symbol ? (t.color || '#fff') : 'transparent'}`,
+            boxShadow: selected === t.symbol ? `0 2px 8px ${t.color || '#fff'}40` : 'none',
+          }}
+        >
+          {t.imageUrl ? <img src={t.imageUrl} alt={t.symbol} style={{ width: 14, height: 14, borderRadius: '50%' }} /> : t.icon} {t.symbol}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const clock = useClock();
   const [isConnected, setIsConnected]   = useState(false);
-  const [walletAddress, setWalletAddress] = useState(null);
+  const [walletAddress, setWalletAddress] = useState(() => loadLS('monad_wallet', null));
   const [isConnecting, setIsConnecting] = useState(false);
   const [cards, setCards]               = useState(mockTraders.map(t => ({ ...t, isLive: false })));
   const [toast, setToast]               = useState(null);
   const [matchTrader, setMatchTrader]   = useState(null);
   const [showApe, setShowApe]           = useState(false);
-  const [portfolio, setPortfolio]       = useState([]);
-  const [activeTab, setActiveTab]       = useState('deck');
+  const [portfolio, setPortfolio]       = useState(() => loadLS('monad_portfolio', []));
+  const [activeTab, setActiveTab]       = useState(() => loadLS('monad_tab', 'deck'));
   const [isLoading, setIsLoading]       = useState(false);
   const [isLiveData, setIsLiveData]     = useState(false);
   const [stats, setStats]               = useState(null);
-  const [lastTxHash, setLastTxHash]     = useState(null);
+  const [trendingTokens, setTrendingTokens] = useState([]);
+  const [tradeAmount, setTradeAmount]   = useState(() => loadLS('monad_tradeAmount', 0.001));
+  const [tradeToken, setTradeToken]     = useState(() => loadLS('monad_tradeToken', 'MON'));
+  const [lastTxHash, setLastTxHash]     = useState(() => loadLS('monad_lastTx', null));
   const topCardRef  = useRef(null);
   const matchTimer  = useRef(null);
+
+  const allTokens = useMemo(() => {
+    const base = [...SWAP_TOKENS];
+    const seen = new Set(base.map(t => t.symbol));
+    for (const pt of trendingTokens) {
+      const sym = pt.baseToken?.symbol;
+      if (sym && !seen.has(sym)) {
+        seen.add(sym);
+        base.push({
+          symbol: sym,
+          label: sym,
+          icon: null,
+          imageUrl: pt.imageUrl,
+          color: '#ffffff', // default if no specific color
+          address: pt.baseToken.address,
+          pairAddress: pt.pairAddress,
+        });
+      }
+    }
+    return base;
+  }, [trendingTokens]);
+
+  // ── Dinamik scale: viewport yüksekliğine tam sığdır ──
+  useEffect(() => {
+    const CONTAINER_H = 852;
+    const PADDING = 16; // üst+alt boşluk
+    const updateScale = () => {
+      const vh = window.innerHeight;
+      const scale = Math.min(1, (vh - PADDING) / CONTAINER_H);
+      document.documentElement.style.setProperty('--app-scale', scale);
+    };
+    updateScale();
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
+  }, []);
 
   // Auto-reconnect if MetaMask already authorized
   useEffect(() => {
     getConnectedAccount().then((addr) => {
-      if (addr) { setWalletAddress(addr); setIsConnected(true); }
+      if (addr) {
+        setWalletAddress(addr);
+        setIsConnected(true);
+        saveLS('monad_wallet', addr);
+      }
     });
 
     if (isMetaMaskAvailable()) {
       const handleAccountsChanged = (accounts) => {
-        if (!accounts.length) { setIsConnected(false); setWalletAddress(null); }
-        else { setWalletAddress(accounts[0].toLowerCase()); }
+        if (!accounts.length) {
+          setIsConnected(false);
+          setWalletAddress(null);
+          saveLS('monad_wallet', null);
+        } else {
+          const addr = accounts[0].toLowerCase();
+          setWalletAddress(addr);
+          saveLS('monad_wallet', addr);
+        }
       };
       const handleChainChanged = () => window.location.reload();
       window.ethereum.on('accountsChanged', handleAccountsChanged);
@@ -174,12 +348,46 @@ export default function App() {
     }
   }, []);
 
+  // Cüzdan adresi değişince localStorage'a kaydet + bağlantı durumunu güncelle
+  useEffect(() => {
+    if (walletAddress) {
+      saveLS('monad_wallet', walletAddress);
+      setIsConnected(true);
+    }
+  }, [walletAddress]);
+
+  // Portfolio değişince kaydet
+  useEffect(() => {
+    saveLS('monad_portfolio', portfolio);
+  }, [portfolio]);
+
+  // Son tx hash değişince kaydet
+  useEffect(() => {
+    if (lastTxHash) saveLS('monad_lastTx', lastTxHash);
+  }, [lastTxHash]);
+
+  // Aktif sekme değişince kaydet
+  useEffect(() => {
+    saveLS('monad_tab', activeTab);
+  }, [activeTab]);
+
+  // Trade miktarı değişince kaydet
+  useEffect(() => {
+    saveLS('monad_tradeAmount', tradeAmount);
+  }, [tradeAmount]);
+
+  // Seçili token değişince kaydet
+  useEffect(() => {
+    saveLS('monad_tradeToken', tradeToken);
+  }, [tradeToken]);
+
   useEffect(() => {
     if (!isConnected) return;
     setIsLoading(true);
-    Promise.all([fetchTopTraders(), fetchMonadStats()]).then(([result, statsData]) => {
+    Promise.all([fetchTopTraders(), fetchMonadStats(), fetchMonadTrendingTokens(15)]).then(([result, statsData, trendingData]) => {
       if (result.traders) { setCards(result.traders); setIsLiveData(true); }
       if (statsData) setStats(statsData);
+      if (trendingData) setTrendingTokens(trendingData);
     }).finally(() => setIsLoading(false));
   }, [isConnected]);
 
@@ -197,10 +405,10 @@ export default function App() {
     setCards((prev) => prev.filter((c) => c.id !== trader.id));
   }, []);
 
-  const sendTx = useCallback(async (trader, amountMon) => {
+  const sendTx = useCallback(async (trader, amountMon, tokenObj) => {
     if (!walletAddress || !trader.address) return;
     try {
-      const txHash = await sendTradeTransaction(walletAddress, trader.address, amountMon);
+      const txHash = await executeTradeTransaction(walletAddress, trader.address, amountMon, tokenObj?.symbol, tokenObj?.address);
       setLastTxHash(txHash);
       showToast('tx_sent');
     } catch (err) {
@@ -209,21 +417,29 @@ export default function App() {
   }, [walletAddress]);
 
   const handleSwipeLeft  = useCallback((t) => { removeCard(t); showToast('pass'); }, [removeCard]);
-  const handleSwipeRight = useCallback((t) => {
+  const handleSwipeRight = useCallback(async (t) => {
     removeCard(t); showToast('copy');
-    sendTx(t, 0.001);
-    setPortfolio(prev => [{ trader: t, action: 'COPY', amount: 0.001, time: Date.now() }, ...prev]);
+    const tokenObj = allTokens.find(tk => tk.symbol === tradeToken) || { symbol: tradeToken };
+    sendTx(t, tradeAmount, tokenObj);
+    // Snapshot entry price at trade time for PnL tracking
+    const monPriceData = await fetchMONPrice().catch(() => null);
+    const entryPriceUsd = monPriceData?.priceUsd ?? null;
+    setPortfolio(prev => [{ trader: t, action: 'COPY', amount: tradeAmount, token: tokenObj, time: Date.now(), entryPriceUsd }, ...prev]);
     if (Math.random() < 0.35) {
       matchTimer.current = setTimeout(() => setMatchTrader(t), 2400);
     }
-  }, [removeCard, sendTx]);
-  const handleSwipeUp = useCallback((t) => {
+  }, [removeCard, sendTx, tradeAmount, tradeToken, allTokens]);
+  const handleSwipeUp = useCallback(async (t) => {
     removeCard(t); showToast('ape');
     setShowApe(true);
     setTimeout(() => setShowApe(false), 1200);
-    sendTx(t, 0.005);
-    setPortfolio(prev => [{ trader: t, action: 'ALL IN', amount: 0.005, time: Date.now() }, ...prev]);
-  }, [removeCard, sendTx]);
+    const tokenObj = allTokens.find(tk => tk.symbol === tradeToken) || { symbol: tradeToken };
+    sendTx(t, tradeAmount, tokenObj);
+    // Snapshot entry price at trade time for PnL tracking
+    const monPriceData = await fetchMONPrice().catch(() => null);
+    const entryPriceUsd = monPriceData?.priceUsd ?? null;
+    setPortfolio(prev => [{ trader: t, action: 'ALL IN', amount: tradeAmount, token: tokenObj, time: Date.now(), entryPriceUsd }, ...prev]);
+  }, [removeCard, sendTx, tradeAmount, tradeToken, allTokens]);
 
   const swipe = (dir) => topCardRef.current?.swipe(dir);
 
@@ -292,7 +508,7 @@ export default function App() {
             {activeTab === 'deck' ? 'Trade Deck' : activeTab === 'leaderboard' ? 'Leaderboard' : activeTab === 'portfolio' ? 'Portfolio' : 'Profile'}
           </div>
         </div>
-        <button 
+        <button
           onClick={async () => {
             if (isConnected) return;
             if (!isMetaMaskAvailable()) {
@@ -305,6 +521,7 @@ export default function App() {
               const addr = await connectWallet();
               setWalletAddress(addr);
               setIsConnected(true);
+              saveLS('monad_wallet', addr);
               showToast('connect');
             } catch (err) {
               if (err.message !== 'NO_METAMASK' && err.code !== 4001) showToast('tx_error');
@@ -312,15 +529,15 @@ export default function App() {
               setIsConnecting(false);
             }
           }}
-          className="flex items-center gap-2 rounded-full border border-gray-200 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-gray-700 bg-white shadow-sm"
+          className={`connect-btn ${isConnected ? 'connected' : ''}`}
         >
           {isConnected ? (
             <>
-              <div className="h-1.5 w-1.5 rounded-full bg-purple-500 animate-live-pulse" />
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00f5a0', boxShadow: '0 0 8px #00f5a0' }} />
               {walletAddress.slice(0, 5)}…{walletAddress.slice(-4)}
             </>
           ) : (
-            isConnecting ? '⏳ Connect' : '🦊 Connect'
+            isConnecting ? '⏳ Connecting…' : '🦊 Connect'
           )}
         </button>
       </header>
@@ -328,17 +545,17 @@ export default function App() {
       {/* ── MAIN CONTENT ── */}
       <main className="main-content">
         {!isConnected ? (
-          <div className="flex flex-col items-center justify-center h-full text-center pb-20">
-            <div className="text-6xl mb-6 grayscale opacity-50">🦊</div>
-            <h3 className="text-xl font-bold text-gray-900">Connect to Swipe</h3>
-            <p className="text-gray-500 mt-2 max-w-sm">Connect your MetaMask wallet to view live traders and start copy-trading.</p>
+          <div className="flex flex-col items-center justify-center h-full text-center pb-20" style={{ gap: 16 }}>
+            <div style={{ fontSize: 64, filter: 'drop-shadow(0 0 24px rgba(247,37,133,0.5))' }}>🦊</div>
+            <h3 style={{ fontSize: 20, fontWeight: 900, color: '#ffffff', margin: 0 }}>Connect to Swipe</h3>
+            <p style={{ color: 'rgba(255,255,255,0.45)', margin: 0, maxWidth: 240, fontSize: 13, lineHeight: 1.5 }}>Connect your MetaMask wallet to view live traders and start copy-trading.</p>
           </div>
         ) : activeTab === 'deck' ? (
           <div className="flex flex-col h-full w-full relative">
             {isLoading ? (
-              <div className="flex flex-col items-center justify-center h-full pb-20">
-                <div className="w-8 h-8 rounded-full border-2 border-transparent border-t-purple-500 border-r-purple-200 animate-spin" />
-                <p className="mt-4 text-sm font-semibold text-gray-500">Loading traders…</p>
+              <div className="flex flex-col items-center justify-center h-full pb-20" style={{ gap: 16 }}>
+                <div style={{ width: 36, height: 36, borderRadius: '50%', border: '3px solid transparent', borderTopColor: '#f72585', borderRightColor: '#7b61ff', animation: 'spin 0.8s linear infinite', boxShadow: '0 0 20px rgba(247,37,133,0.4)' }} />
+                <p style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.45)', margin: 0 }}>Loading traders…</p>
               </div>
             ) : cards.length > 0 ? (
               <>
@@ -359,18 +576,35 @@ export default function App() {
                     );
                   })}
                 </div>
+                <TokenSelector selected={tradeToken} onChange={setTradeToken} tokens={allTokens} />
+                <TierSelector amount={tradeAmount} onChange={setTradeAmount} />
                 <div className="action-row">
-                  <button type="button" className="btn-pass" onClick={() => swipe('left')}>✕</button>
-                  <button type="button" className="btn-ape" onClick={() => swipe('up')}>ALL IN</button>
-                  <button type="button" className="btn-copy" onClick={() => swipe('right')}>✓</button>
+                  <button type="button" className="btn-pass" onClick={() => swipe('left')} title="Pass">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                      <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+                    </svg>
+                  </button>
+                  <button type="button" className="btn-ape" onClick={() => swipe('up')}>ALL IN 💸</button>
+                  <button type="button" className="btn-copy" onClick={() => swipe('right')} title="Copy Trade">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                      <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
                 </div>
               </>
             ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center pb-20">
-                <span className="text-4xl mb-4">🃏</span>
-                <h3 className="font-bold text-gray-900">Deck Empty</h3>
-                <p className="text-sm text-gray-500 mt-1">You've seen all live traders.</p>
-                <button onClick={resetDeck} className="mt-6 px-6 py-2 bg-white border border-gray-200 shadow-sm rounded-full text-sm font-bold text-gray-700 hover:bg-gray-50">
+              <div className="flex flex-col items-center justify-center h-full text-center pb-20" style={{ gap: 12 }}>
+                <span style={{ fontSize: 48, filter: 'drop-shadow(0 0 20px rgba(247,37,133,0.5))' }}>🃏</span>
+                <h3 style={{ fontWeight: 900, color: '#ffffff', fontSize: 18, margin: 0 }}>Deck Empty</h3>
+                <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', margin: 0 }}>You've seen all live traders.</p>
+                <button onClick={resetDeck} style={{
+                  marginTop: 8, padding: '10px 28px',
+                  background: 'linear-gradient(135deg, #f72585, #7b61ff)',
+                  border: 'none', borderRadius: 50,
+                  fontSize: 12, fontWeight: 800, color: '#fff',
+                  cursor: 'pointer', letterSpacing: '0.08em', textTransform: 'uppercase',
+                  boxShadow: '0 8px 24px rgba(247,37,133,0.4)',
+                }}>
                   Reload Deck
                 </button>
               </div>
@@ -381,52 +615,28 @@ export default function App() {
             <Leaderboard traders={cards.length > 0 ? cards : mockTraders} />
           </div>
         ) : activeTab === 'portfolio' ? (
-          portfolio.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center pb-20">
-              <span className="text-4xl mb-4 grayscale opacity-50">📊</span>
-              <h3 className="font-bold text-gray-900">Portfolio Empty</h3>
-              <p className="text-sm text-gray-500 mt-1">Copied trades will appear here.</p>
-            </div>
-          ) : (
-            <div className="h-full overflow-y-auto px-1 pb-4" style={{ scrollbarWidth: 'none' }}>
-              {portfolio.map((item, i) => (
-                <div key={i} className="flex items-center justify-between p-4 mb-3 bg-white border border-gray-200 rounded-2xl shadow-sm hover:border-purple-300 transition">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center border border-purple-100 text-purple-600 font-bold">
-                      {item.action === 'COPY' ? '✓' : '💸'}
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-gray-900">{item.trader.address.slice(0, 8)}…{item.trader.address.slice(-4)}</div>
-                      <div className="text-[11px] text-gray-500 mt-0.5">{new Date(item.time).toLocaleTimeString()} · {item.action}</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-gray-900">{item.amount} MON</div>
-                    <div className="text-[10px] text-gray-400 font-mono mt-0.5">Pending</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )
+          <div className="h-full px-1">
+            <Portfolio portfolio={portfolio} />
+          </div>
         ) : (
-          <div className="space-y-4 pt-4">
-            <div className="p-4 bg-purple-50 border border-purple-100 rounded-xl">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-purple-600">Connected Wallet</p>
-              <p className="mt-1 font-mono font-bold text-gray-900 break-all">{walletAddress}</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 16 }}>
+            <div style={{ padding: '14px 16px', background: 'rgba(123,97,255,0.1)', border: '1px solid rgba(123,97,255,0.25)', borderRadius: 16 }}>
+              <p style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.15em', color: '#7b61ff', margin: 0 }}>Connected Wallet</p>
+              <p style={{ marginTop: 6, fontFamily: 'monospace', fontWeight: 700, color: '#ffffff', wordBreak: 'break-all', fontSize: 12, margin: '6px 0 0' }}>{walletAddress}</p>
             </div>
             {lastTxHash ? (
-              <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Last Transaction</p>
-                <p className="mt-1 font-mono text-sm text-gray-700 break-all">{lastTxHash}</p>
-                <a href={`${EXPLORER_URL}/tx/${lastTxHash}`} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs font-bold text-purple-600 hover:underline">
+              <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16 }}>
+                <p style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.15em', color: 'rgba(255,255,255,0.4)', margin: 0 }}>Last Transaction</p>
+                <p style={{ marginTop: 6, fontFamily: 'monospace', fontSize: 11, color: 'rgba(255,255,255,0.7)', wordBreak: 'break-all', margin: '6px 0 0' }}>{lastTxHash}</p>
+                <a href={`${EXPLORER_URL}/tx/${lastTxHash}`} target="_blank" rel="noreferrer" style={{ marginTop: 10, display: 'inline-block', fontSize: 11, fontWeight: 700, color: '#7b61ff', textDecoration: 'none' }}>
                   View on SocialScan ↗
                 </a>
               </div>
             ) : (
-              <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-center py-8">
-                <span className="text-3xl mb-2 block grayscale opacity-50">⛓</span>
-                <p className="text-sm font-bold text-gray-900">No Transactions</p>
-                <p className="text-xs text-gray-500 mt-1">Swipe right on a trader to send a transaction.</p>
+              <div style={{ padding: '32px 16px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, textAlign: 'center' }}>
+                <span style={{ fontSize: 32, display: 'block', marginBottom: 8, opacity: 0.4 }}>⛓</span>
+                <p style={{ fontSize: 14, fontWeight: 700, color: '#ffffff', margin: 0 }}>No Transactions</p>
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 4, margin: '4px 0 0' }}>Swipe right on a trader to send a transaction.</p>
               </div>
             )}
           </div>
@@ -435,19 +645,26 @@ export default function App() {
 
       {/* ── BOTTOM NAV ── */}
       <nav className="bottom-nav">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            className={`nav-item ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            <div className="nav-icon">
-              <tab.Icon active={activeTab === tab.id} />
-            </div>
-            <span>{tab.label}</span>
-          </button>
-        ))}
+        {TABS.map((tab) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className={`nav-item ${isActive ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+              style={isActive ? {
+                background: 'rgba(255,255,255,0.06)',
+              } : {}}
+            >
+              <div className="nav-icon">
+                <tab.Icon active={isActive} />
+              </div>
+              <span>{tab.label}</span>
+              {isActive && <div className="nav-dot" />}
+            </button>
+          );
+        })}
       </nav>
 
     </div>
