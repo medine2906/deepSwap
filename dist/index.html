@@ -8,10 +8,21 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#050816" />
     <title>Monad Swipe</title>
-    <script type="module" crossorigin src="/assets/index-CtT-bL2P.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-ClIYnsSh.css">
+    <script type="module" crossorigin src="/assets/index-ISGF3xa_.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DyY6x1r0.css">
   </head>
   <body>
+    <div id="error-overlay" style="position: fixed; top: 0; left: 0; right: 0; background: red; color: white; z-index: 9999; padding: 20px; display: none; font-family: monospace; white-space: pre-wrap;"></div>
+    <script>
+      window.addEventListener('error', function(e) {
+        document.getElementById('error-overlay').style.display = 'block';
+        document.getElementById('error-overlay').textContent += e.message + '\n' + (e.error ? e.error.stack : '') + '\n\n';
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        document.getElementById('error-overlay').style.display = 'block';
+        document.getElementById('error-overlay').textContent += 'Promise Rejection: ' + e.reason + '\n\n';
+      });
+    </script>
     <div id="root"></div>
   </body>
 </html>

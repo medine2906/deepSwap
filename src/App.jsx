@@ -5,6 +5,7 @@ import Leaderboard from './components/Leaderboard';
 import Portfolio from './components/Portfolio';
 import Inbox from './components/Inbox';
 import Chat from './components/Chat';
+import WatchlistPanel from './components/WatchlistPanel';
 import { BlockieAvatar } from './components/SwipeCard';
 import mockTraders from './data/mockTraders.json';
 import { fetchTopTraders, fetchMonadStats, EXPLORER_ADDR_URL } from './services/monadApi';
@@ -298,6 +299,8 @@ export default function App() {
   const [matches, setMatches]           = useState(() => loadLS('monad_matches', []));
   const [messages, setMessages]         = useState(() => loadLS('monad_messages', {}));
   const [activeChat, setActiveChat]     = useState(null);
+  const [watchlist, setWatchlist]       = useState(() => loadLS('monad_watchlist', []));
+  const [lbMode, setLbMode]             = useState('rankings');
   const topCardRef  = useRef(null);
   const matchTimer  = useRef(null);
 
@@ -406,6 +409,14 @@ export default function App() {
   useEffect(() => {
     saveLS('monad_favorites', favorites);
   }, [favorites]);
+
+  // Watchlist değişince kaydet
+  useEffect(() => {
+    saveLS('monad_watchlist', watchlist);
+  }, [watchlist]);
+
+  const addWatchWallet  = useCallback((addr) => setWatchlist(prev => [addr, ...prev]), []);
+  const removeWatchWallet = useCallback((addr) => setWatchlist(prev => prev.filter(a => a !== addr)), []);
 
   // Eşleşmeler ve Mesajlar
   useEffect(() => {
@@ -646,8 +657,38 @@ export default function App() {
       {/* ── MAIN CONTENT ── */}
       <main className="main-content">
         {activeTab === 'leaderboard' ? (
-          <div className="h-full overflow-hidden -mx-4 flex flex-col">
-            <Leaderboard traders={cards.length > 0 ? cards : mockTraders} />
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', margin: '0 -16px' }}>
+            {/* Mode toggle */}
+            <div style={{ display: 'flex', gap: 6, padding: '0 16px 10px', flexShrink: 0 }}>
+              {[{ id: 'rankings', label: '🏆 Rankings' }, { id: 'watchlist', label: '🐋 Watchlist' }].map(m => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setLbMode(m.id)}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 12, border: 'none', cursor: 'pointer',
+                    fontSize: 11, fontWeight: 800, transition: 'all 0.18s',
+                    background: lbMode === m.id ? 'linear-gradient(135deg,#7b61ff,#4cc9f0)' : 'rgba(255,255,255,0.06)',
+                    color: lbMode === m.id ? '#fff' : 'rgba(255,255,255,0.4)',
+                    boxShadow: lbMode === m.id ? '0 4px 16px rgba(123,97,255,0.3)' : 'none',
+                  }}
+                >
+                  {m.label}
+                  {m.id === 'watchlist' && watchlist.length > 0 && (
+                    <span style={{ marginLeft: 5, background: '#f72585', borderRadius: 8, padding: '1px 5px', fontSize: 9 }}>
+                      {watchlist.length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            {lbMode === 'rankings' ? (
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <Leaderboard traders={cards.length > 0 ? cards : mockTraders} />
+              </div>
+            ) : (
+              <WatchlistPanel wallets={watchlist} onAdd={addWatchWallet} onRemove={removeWatchWallet} />
+            )}
           </div>
         ) : !isConnected ? (
           <div className="flex flex-col items-center justify-center h-full text-center pb-20" style={{ gap: 16 }}>

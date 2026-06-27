@@ -28,7 +28,10 @@ const SORTS = [
 ];
 
 function parseProfitNum(profit) {
-  return parseFloat(profit.replace(/[+$,K]/g, s => s === 'K' ? '000' : '')) || 0;
+  // "+1.23 MON", "+$1,234", "-0.5 MON", "+1.2K" formatlarını destekler
+  return parseFloat(
+    profit.replace(/\s*MON\s*/g, '').replace(/[+$,]/g, '').replace(/K/g, '000')
+  ) || 0;
 }
 
 function parseVolumeNum(vol) {

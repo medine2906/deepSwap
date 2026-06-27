@@ -299,7 +299,7 @@ const SwipeCard = forwardRef(function SwipeCard(
     return `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0) rotate(${rotate}deg)`;
   }, [dragOffset.x, dragOffset.y, isTopCard]);
 
-  const isPositive = trader.sentiment !== 'bearish';
+  const isPositive = !trader.profit?.startsWith('-');
   const token      = TOKEN_META[trader.tokenSymbol] ?? TOKEN_META.MON;
   const sentiment  = SENTIMENT_MAP[trader.sentiment] ?? SENTIMENT_MAP.neutral;
   const tier       = TIER[trader.tier] ?? TIER.fresh;

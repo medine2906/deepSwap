@@ -75,8 +75,6 @@ function mapAccountToTrader(acc, index) {
   const balanceMon = weiToMon(balanceRaw);
   const balNum = parseFloat(balanceMon);
   const txCount = parseInt(acc.txcount || acc.transactions_count || 0, 10);
-  const winRate = Math.min(96, 52 + (txCount % 45));
-  const pnl = Math.floor(balNum * 0.012 * (1 + txCount / 80) + txCount * 5);
   const tier =
     balNum > 100000 ? 'whale'
     : balNum > 10000 ? 'smart_money'
@@ -88,14 +86,14 @@ function mapAccountToTrader(acc, index) {
     id: index + 1,
     address: acc.address || acc.hash,
     balanceMon,
-    winRate,
-    profit: `+$${pnl.toLocaleString()}`,
+    winRate: 50,           // enrichTrader tarafından gerçek veriyle doldurulacak
+    profit: '… MON',      // enrichTrader tarafından gerçek veriyle doldurulacak
     actionText: acc.actionText ?? `${balanceMon} MON`,
     tokenSymbol: acc.tokenSymbol ?? 'MON',
     tradeSize: balNum,
     txCount,
     sentiment: SENTIMENTS[index % SENTIMENTS.length],
-    confidence: Math.min(98, 55 + (txCount % 43)),
+    confidence: 50,
     tags: TAG_POOLS[index % TAG_POOLS.length],
     isPremium: false,
     tier,
@@ -118,31 +116,54 @@ async function fetchJson(url, timeout = 7000) {
   return res.json();
 }
 
-// Enrich a single trader with their last transactions (runs in parallel for all)
+// Enrich a single trader with real on-chain metrics from their last transactions
 async function enrichTrader(trader) {
   try {
     const data = await fetchJson(
-      `${API_BASE}/api/v2/addresses/${trader.address}/transactions?limit=5&filter=validated`,
+      `${API_BASE}/api/v2/addresses/${trader.address}/transactions?limit=20&filter=validated`,
       5000
     );
     const txns = (data.items || []).filter(Boolean);
     if (!txns.length) return trader;
 
+    const addr = trader.address.toLowerCase();
     const lastTx = txns[0];
+
+    // Real win rate: kendi gönderdiği tx'lerin kaçı başarılı
+    const senderTxns = txns.filter(tx => tx.from?.hash?.toLowerCase() === addr);
+    const successTxns = senderTxns.filter(tx => tx.status === 'ok' || tx.result === 'Success');
+    const realWinRate = senderTxns.length > 0
+      ? Math.round((successTxns.length / senderTxns.length) * 100)
+      : trader.winRate;
+
+    // Real net MON: received − sent (gerçek zincir akışı)
+    const received = txns
+      .filter(tx => tx.to?.hash?.toLowerCase() === addr)
+      .reduce((s, tx) => s + parseFloat(tx.value || '0') / 1e18, 0);
+    const sent = senderTxns
+      .reduce((s, tx) => s + parseFloat(tx.value || '0') / 1e18, 0);
+    const netMon = received - sent;
+    const profitStr = netMon >= 0
+      ? `+${netMon.toFixed(3)} MON`
+      : `${netMon.toFixed(3)} MON`;
+
+    // Real volume: tüm tx değerlerinin toplamı
     const totalVolMon = txns.reduce((s, tx) => s + parseFloat(tx.value || '0') / 1e18, 0);
-    const sparkVals = txns.map(tx => parseFloat(tx.value || '0') / 1e18);
+
+    // Sparkline: tx değerleri kronolojik sırayla (API newest-first → reverse)
+    const sparkVals = [...txns].reverse().map(tx => parseFloat(tx.value || '0') / 1e18);
 
     return {
       ...trader,
+      winRate: realWinRate,
+      profit: profitStr,
       actionText: deriveActionText(lastTx, trader.address),
       lastTxHash: lastTx.hash,
       lastTxBlock: lastTx.block,
       lastTxMethod: lastTx.method || null,
       volume24h: totalVolMon > 0 ? `${totalVolMon.toFixed(3)} MON` : null,
       sparkline: sparklineFromValues(sparkVals) ?? trader.sparkline,
-      tokenSymbol:
-        lastTx.tx_types?.includes('token_transfer') ? 'MON'
-        : trader.tokenSymbol,
+      tokenSymbol: lastTx.tx_types?.includes('token_transfer') ? 'MON' : trader.tokenSymbol,
     };
   } catch {
     return trader;
@@ -189,12 +210,30 @@ export async function fetchTopTraders() {
 
   if (!traders?.length) return { traders: null, isLive: false };
 
-  // Enrich top 8 in parallel with real last-tx data
-  const top = traders.slice(0, 8);
-  const rest = traders.slice(8);
-  const enriched = await Promise.all(top.map(enrichTrader));
+  // Tüm trader'ları gerçek zincir verisiyle zenginleştir
+  const enriched = await Promise.all(traders.map(enrichTrader));
 
-  return { traders: [...enriched, ...rest], isLive: true };
+  return { traders: enriched, isLive: true };
+}
+
+export async function fetchWalletInfo(address) {
+  try {
+    return await fetchJson(`${API_BASE}/api/v2/addresses/${address}`, 5000);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchWalletTxns(address, limit = 10) {
+  try {
+    const data = await fetchJson(
+      `${API_BASE}/api/v2/addresses/${address}/transactions?limit=${limit}&filter=validated`,
+      6000
+    );
+    return data.items || [];
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchMonadStats() {
